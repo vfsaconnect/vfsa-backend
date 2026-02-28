@@ -112,8 +112,9 @@ def predict_landmarks():
         else:
             conf = 1.0
 
+        # FIXED: Return pred directly as string instead of converting through LABELS
         return jsonify({
-            "letter": LABELS[int(pred)],
+            "letter": str(pred),  # ← FIXED: No int conversion, just return the letter directly
             "confidence": conf,
             "model": "SVM"
         })
