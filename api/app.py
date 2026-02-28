@@ -17,26 +17,28 @@ CORS(app)
 # LOAD MODELS (Railway Safe Paths)
 # =====================================================
 
-# Get the directory where this file (app.py) is located
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Current file: /app/api/app.py
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # /app/api
 
-# Go up one level to project root (since app.py is in backend folder)
-PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
+# Go up one level from /app/api → /app
+PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))  # /app
 
-# AI model directory is at project root/ai_model
-AI_MODEL_DIR = os.path.join(PROJECT_ROOT, "ai_model")
+# Now point to /app/ai_model
+AI_MODEL_DIR = os.path.join(PROJECT_ROOT, "ai_model")  # /app/ai_model
 
 # Model paths
 SVM_PATH = os.path.join(AI_MODEL_DIR, "isl_landmark_model.pkl")
 SCALER_PATH = os.path.join(AI_MODEL_DIR, "scaler.pkl")
 CNN_PATH = os.path.join(AI_MODEL_DIR, "cnn_model.h5")
 
+print("=" * 50)
 print("📂 BASE_DIR:", BASE_DIR)
 print("📂 PROJECT_ROOT:", PROJECT_ROOT)
 print("📂 AI_MODEL_DIR:", AI_MODEL_DIR)
 print("📂 SVM_PATH:", SVM_PATH)
 print("📂 SCALER_PATH:", SCALER_PATH)
 print("📂 CNN_PATH:", CNN_PATH)
+print("=" * 50)
 
 svm_model = None
 scaler = None
@@ -48,7 +50,7 @@ try:
         svm_model = joblib.load(SVM_PATH)
         print("✅ SVM model loaded")
     else:
-        print("⚠️ SVM model not found at:", SVM_PATH)
+        print("❌ SVM model NOT found at:", SVM_PATH)
 except Exception as e:
     print("❌ SVM load error:", e)
 
@@ -58,7 +60,7 @@ try:
         scaler = joblib.load(SCALER_PATH)
         print("✅ Scaler loaded")
     else:
-        print("⚠️ Scaler not found at:", SCALER_PATH)
+        print("❌ Scaler NOT found at:", SCALER_PATH)
 except Exception as e:
     print("❌ Scaler load error:", e)
 
@@ -68,7 +70,7 @@ try:
         cnn_model = tf.keras.models.load_model(CNN_PATH)
         print("✅ CNN model loaded")
     else:
-        print("⚠️ CNN model not found at:", CNN_PATH)
+        print("❌ CNN model NOT found at:", CNN_PATH)
 except Exception as e:
     print("❌ CNN load error:", e)
 
@@ -94,23 +96,35 @@ def predict_landmarks():
 
         landmarks = np.array(data["landmarks"])
 
+        # If only one hand detected (63 features), pad zeros
         if len(landmarks) == 63:
             landmarks = np.concatenate([landmarks, np.zeros(63)])
 
+        # Ensure correct size
         if len(landmarks) != 126:
-            return jsonify({"error": f"Expected 126 features, got {len(landmarks)}"}), 400
+            return jsonify({
+                "error": f"Expected 126 features, got {len(landmarks)}"
+            }), 400
 
         landmarks = landmarks.reshape(1, -1)
+
+        # Apply scaler
         landmarks = scaler.transform(landmarks)
 
+        # Make prediction
         pred = svm_model.predict(landmarks)[0]
 
+        # Get confidence if available
         if hasattr(svm_model, "predict_proba"):
             conf = float(np.max(svm_model.predict_proba(landmarks)))
         else:
             conf = 1.0
 
-        letter = LABELS[int(pred)] if isinstance(pred, (int, np.integer)) else str(pred)
+        # Convert prediction to letter
+        if isinstance(pred, (int, np.integer)):
+            letter = LABELS[int(pred)]
+        else:
+            letter = str(pred)
 
         return jsonify({
             "letter": letter,
@@ -140,11 +154,13 @@ def predict_image():
         if frame is None:
             return jsonify({"error": "Invalid image format"}), 400
 
+        # Preprocess for CNN
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         resized = cv2.resize(rgb, (128, 128))
         norm = resized / 255.0
         input_img = np.expand_dims(norm, axis=0)
 
+        # Predict
         predictions = cnn_model.predict(input_img, verbose=0)[0]
         pred = int(np.argmax(predictions))
         conf = float(np.max(predictions))
@@ -162,6 +178,7 @@ def predict_image():
 
 @app.route("/health", methods=["GET"])
 def health_check():
+    """Health check endpoint for monitoring"""
     return jsonify({
         "status": "healthy",
         "svm_loaded": svm_model is not None,
@@ -176,23 +193,25 @@ def health_check():
 
 
 # =====================================================
-# SERVE REACT FRONTEND (Optional - uncomment if you want to serve React)
+# SERVE REACT FRONTEND (if you have static files)
 # =====================================================
 
-# @app.route("/", defaults={"path": ""})
-# @app.route("/<path:path>")
-# def serve_react(path):
-#     """Serve React frontend for all non-API routes"""
-#     # Skip API routes
-#     if path.startswith(("predict_", "health")):
-#         return jsonify({"error": "API endpoint not found"}), 404
+# Uncomment this if you want to serve React from /app/api/static
+"""
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_react(path):
+    # Skip API routes
+    if path.startswith(("predict_", "health")):
+        return jsonify({"error": "API endpoint not found"}), 404
     
-#     file_path = os.path.join(app.static_folder, path)
-#
-#     if path != "" and os.path.exists(file_path):
-#         return send_from_directory(app.static_folder, path)
-#
-#     return send_from_directory(app.static_folder, "index.html")
+    file_path = os.path.join(app.static_folder, path)
+
+    if path != "" and os.path.exists(file_path):
+        return send_from_directory(app.static_folder, path)
+
+    return send_from_directory(app.static_folder, "index.html")
+"""
 
 
 # =====================================================
