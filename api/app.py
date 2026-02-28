@@ -3,8 +3,8 @@ from flask_cors import CORS
 import numpy as np
 import joblib
 import os
-import cv2
-import tensorflow as tf
+# import cv2  # Commented out temporarily
+# import tensorflow as tf  # Commented out temporarily
 
 app = Flask(__name__)
 CORS(app)
@@ -22,6 +22,9 @@ SCALER_PATH = os.path.join(AI_MODEL_DIR, "scaler.pkl")
 CNN_PATH = os.path.join(AI_MODEL_DIR, "cnn_model.h5")
 
 print("📂 AI_MODEL_DIR:", AI_MODEL_DIR)
+print("📂 SVM_PATH:", SVM_PATH)
+print("📂 SCALER_PATH:", SCALER_PATH)
+print("📂 CNN_PATH:", CNN_PATH)
 
 # =========================================
 # LAZY LOAD MODELS (IMPORTANT)
@@ -35,16 +38,31 @@ def load_svm():
     global svm_model, scaler
     if svm_model is None:
         print("🔄 Loading SVM model...")
-        svm_model = joblib.load(SVM_PATH)
-        scaler = joblib.load(SCALER_PATH)
-        print("✅ SVM Loaded")
+        if os.path.exists(SVM_PATH):
+            svm_model = joblib.load(SVM_PATH)
+            print("✅ SVM Loaded")
+        else:
+            print("❌ SVM model not found at:", SVM_PATH)
+    
+    if scaler is None:
+        print("🔄 Loading Scaler...")
+        if os.path.exists(SCALER_PATH):
+            scaler = joblib.load(SCALER_PATH)
+            print("✅ Scaler Loaded")
+        else:
+            print("❌ Scaler not found at:", SCALER_PATH)
 
 def load_cnn():
     global cnn_model
     if cnn_model is None:
         print("🔄 Loading CNN model...")
-        cnn_model = tf.keras.models.load_model(CNN_PATH)
-        print("✅ CNN Loaded")
+        if os.path.exists(CNN_PATH):
+            # CNN loading temporarily disabled
+            print("⚠️ CNN loading is temporarily disabled")
+            # cnn_model = tf.keras.models.load_model(CNN_PATH)
+            # print("✅ CNN Loaded")
+        else:
+            print("❌ CNN model not found at:", CNN_PATH)
 
 LABELS = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
@@ -57,35 +75,42 @@ print("=" * 50)
 
 @app.route("/")
 def home():
-    return jsonify({
-        "message": "VFSA Backend Running",
-        "health": "/health"
-    })
+    return "VFSA Backend Running", 200
 
 @app.route("/health")
 def health():
-    return jsonify({
-        "status": "running",
-        "svm_loaded": svm_model is not None,
-        "cnn_loaded": cnn_model is not None
-    })
+    return "OK", 200
 
 @app.route("/predict_landmarks", methods=["POST"])
 def predict_landmarks():
     try:
         load_svm()
 
+        if svm_model is None or scaler is None:
+            return jsonify({"error": "SVM model not available"}), 500
+
         data = request.get_json()
+        
+        if not data or "landmarks" not in data:
+            return jsonify({"error": "No landmarks provided"}), 400
+            
         landmarks = np.array(data["landmarks"])
 
         if len(landmarks) == 63:
             landmarks = np.concatenate([landmarks, np.zeros(63)])
 
+        if len(landmarks) != 126:
+            return jsonify({"error": f"Expected 126 features, got {len(landmarks)}"}), 400
+
         landmarks = landmarks.reshape(1, -1)
         landmarks = scaler.transform(landmarks)
 
         pred = svm_model.predict(landmarks)[0]
-        conf = float(np.max(svm_model.predict_proba(landmarks)))
+        
+        if hasattr(svm_model, "predict_proba"):
+            conf = float(np.max(svm_model.predict_proba(landmarks)))
+        else:
+            conf = 1.0
 
         return jsonify({
             "letter": LABELS[int(pred)],
@@ -94,31 +119,28 @@ def predict_landmarks():
         })
 
     except Exception as e:
+        print("❌ predict_landmarks error:", str(e))
         return jsonify({"error": str(e)}), 500
 
 @app.route("/predict_image", methods=["POST"])
 def predict_image():
-    try:
-        load_cnn()
+    # Temporarily disabled - returns message that CNN is not available
+    return jsonify({
+        "error": "CNN prediction temporarily disabled",
+        "message": "Using SVM only mode"
+    }), 503
 
-        file = request.files["image"]
-        img_bytes = np.frombuffer(file.read(), np.uint8)
-        frame = cv2.imdecode(img_bytes, cv2.IMREAD_COLOR)
+# =========================================
+# RUN SERVER
+# =========================================
 
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        resized = cv2.resize(rgb, (128, 128))
-        norm = resized / 255.0
-        input_img = np.expand_dims(norm, axis=0)
-
-        predictions = cnn_model.predict(input_img, verbose=0)[0]
-        pred = int(np.argmax(predictions))
-        conf = float(np.max(predictions))
-
-        return jsonify({
-            "letter": LABELS[pred],
-            "confidence": conf,
-            "model": "CNN"
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    debug = os.environ.get("FLASK_DEBUG", "False").lower() == "true"
+    
+    print(f"🚀 Server starting on port {port}")
+    print(f"🔧 Debug mode: {debug}")
+    print(f"📊 Health check: http://localhost:{port}/health")
+    print("=" * 50)
+    
+    app.run(host="0.0.0.0", port=port, debug=debug)
