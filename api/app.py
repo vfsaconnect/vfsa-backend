@@ -10,41 +10,54 @@ import tensorflow as tf
 # INITIALIZE FLASK APP
 # =====================================================
 app = Flask(__name__, static_folder="static")
-CORS(app)  # Enable CORS for all routes
+CORS(app)
 
 # =====================================================
-# LOAD MODELS
+# LOAD MODELS (Railway Safe Absolute Paths)
 # =====================================================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
+AI_MODEL_DIR = os.path.join(PROJECT_ROOT, "ai_model")
 
-# Adjust paths based on your folder structure
-SVM_PATH = os.path.join(BASE_DIR, "../ai_model/isl_landmark_model.pkl")
-SCALER_PATH = os.path.join(BASE_DIR, "../ai_model/scaler.pkl")
-CNN_PATH = os.path.join(BASE_DIR, "../ai_model/cnn_model.h5")
+SVM_PATH = os.path.join(AI_MODEL_DIR, "isl_landmark_model.pkl")
+SCALER_PATH = os.path.join(AI_MODEL_DIR, "scaler.pkl")
+CNN_PATH = os.path.join(AI_MODEL_DIR, "cnn_model.h5")
 
-# Check if models exist before loading
+print("📂 BASE_DIR:", BASE_DIR)
+print("📂 PROJECT_ROOT:", PROJECT_ROOT)
+print("📂 AI_MODEL_DIR:", AI_MODEL_DIR)
+
 svm_model = None
 scaler = None
 cnn_model = None
 
-if os.path.exists(SVM_PATH):
-    svm_model = joblib.load(SVM_PATH)
-    print("✅ SVM model loaded")
-else:
-    print(f"⚠️ SVM model not found at {SVM_PATH}")
+try:
+    if os.path.exists(SVM_PATH):
+        svm_model = joblib.load(SVM_PATH)
+        print("✅ SVM model loaded")
+    else:
+        print(f"⚠️ SVM model not found at {SVM_PATH}")
+except Exception as e:
+    print(f"❌ Failed loading SVM: {e}")
 
-if os.path.exists(SCALER_PATH):
-    scaler = joblib.load(SCALER_PATH)
-    print("✅ Scaler loaded")
-else:
-    print(f"⚠️ Scaler not found at {SCALER_PATH}")
+try:
+    if os.path.exists(SCALER_PATH):
+        scaler = joblib.load(SCALER_PATH)
+        print("✅ Scaler loaded")
+    else:
+        print(f"⚠️ Scaler not found at {SCALER_PATH}")
+except Exception as e:
+    print(f"❌ Failed loading Scaler: {e}")
 
-if os.path.exists(CNN_PATH):
-    cnn_model = tf.keras.models.load_model(CNN_PATH)
-    print("✅ CNN model loaded")
-else:
-    print(f"⚠️ CNN model not found at {CNN_PATH}")
+try:
+    if os.path.exists(CNN_PATH):
+        cnn_model = tf.keras.models.load_model(CNN_PATH)
+        print("✅ CNN model loaded")
+    else:
+        print(f"⚠️ CNN model not found at {CNN_PATH}")
+except Exception as e:
+    print(f"❌ Failed loading CNN: {e}")
 
 LABELS = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 print("🚀 Hybrid Backend Ready")
@@ -55,7 +68,6 @@ print("🚀 Hybrid Backend Ready")
 
 @app.route("/predict_landmarks", methods=["POST"])
 def predict_landmarks():
-    """Predict gesture from hand landmarks"""
     try:
         if svm_model is None or scaler is None:
             return jsonify({"error": "SVM model not loaded"}), 500
@@ -67,31 +79,24 @@ def predict_landmarks():
 
         landmarks = np.array(data["landmarks"])
 
-        # If only one hand detected (63 features), pad zeros
         if len(landmarks) == 63:
             landmarks = np.concatenate([landmarks, np.zeros(63)])
 
-        # Ensure correct size
         if len(landmarks) != 126:
             return jsonify({
                 "error": f"Expected 126 features, got {len(landmarks)}"
             }), 400
 
         landmarks = landmarks.reshape(1, -1)
-
-        # Apply scaler
         landmarks = scaler.transform(landmarks)
 
-        # Make prediction
         pred = svm_model.predict(landmarks)[0]
 
-        # Get confidence if available
         if hasattr(svm_model, "predict_proba"):
             conf = float(np.max(svm_model.predict_proba(landmarks)))
         else:
             conf = 1.0
 
-        # Convert prediction to letter
         if isinstance(pred, (int, np.integer)):
             letter = LABELS[int(pred)]
         else:
@@ -104,13 +109,12 @@ def predict_landmarks():
         })
 
     except Exception as e:
-        print(f"❌ Error in predict_landmarks: {str(e)}")
+        print(f"❌ Error in predict_landmarks: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 @app.route("/predict_image", methods=["POST"])
 def predict_image():
-    """Predict gesture from image (CNN fallback)"""
     try:
         if cnn_model is None:
             return jsonify({"error": "CNN model not loaded"}), 500
@@ -126,13 +130,11 @@ def predict_image():
         if frame is None:
             return jsonify({"error": "Invalid image format"}), 400
 
-        # Preprocess for CNN
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         resized = cv2.resize(rgb, (128, 128))
         norm = resized / 255.0
         input_img = np.expand_dims(norm, axis=0)
 
-        # Predict
         predictions = cnn_model.predict(input_img, verbose=0)[0]
         pred = int(np.argmax(predictions))
         conf = float(np.max(predictions))
@@ -144,13 +146,12 @@ def predict_image():
         })
 
     except Exception as e:
-        print(f"❌ Error in predict_image: {str(e)}")
+        print(f"❌ Error in predict_image: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 @app.route("/health", methods=["GET"])
 def health_check():
-    """Health check endpoint for monitoring"""
     return jsonify({
         "status": "healthy",
         "svm_loaded": svm_model is not None,
@@ -166,11 +167,9 @@ def health_check():
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve(path):
-    """Serve React frontend for all non-API routes"""
-    # Skip API routes - they should be handled above
     if path.startswith(("predict_", "health")):
         return jsonify({"error": "API endpoint not found"}), 404
-    
+
     file_path = os.path.join(app.static_folder, path)
 
     if path != "" and os.path.exists(file_path):
@@ -180,16 +179,15 @@ def serve(path):
 
 
 # =====================================================
-# RUN SERVER
+# RUN SERVER (Local Only)
 # =====================================================
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "False").lower() == "true"
-    
+
     print(f"🚀 Server starting on port {port}")
     print(f"📁 Serving static files from: {app.static_folder}")
     print(f"🔧 Debug mode: {debug}")
-    print(f"📊 Health check: http://localhost:{port}/health")
-    
+
     app.run(host="0.0.0.0", port=port, debug=debug)
